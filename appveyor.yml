@@ -3,9 +3,6 @@ version: v1.18.0.build{build}
 init:
   - git config --global core.autocrlf true
 
-install:
-  - cinst -y nsis
-
 matrix:
   fast_finish: true
   allow_failures:
@@ -13,6 +10,23 @@ matrix:
       configuration: Release
     - platform: x64
       configuration: Release
+
+environment:
+  matrix:
+    - CMAKE_GENERATOR: Visual Studio 10 2010
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
+    - CMAKE_GENERATOR: Visual Studio 11 2012
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
+    - CMAKE_GENERATOR: Visual Studio 12 2013
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+    - CMAKE_GENERATOR: Visual Studio 14 2015
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+    - CMAKE_GENERATOR: Visual Studio 15 2017
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+    - GYP: true
+      LIBRARY_TYPE: shared
+    - GYP: true
+      LIBRARY_TYPE: static
 
 platform:
   - x86
@@ -22,11 +36,42 @@ configuration:
   - Release
 
 build_script:
-  # Fixed tag version number if using a tag.
-  - cmd: if "%APPVEYOR_REPO_TAG%" == "true" set APPVEYOR_BUILD_VERSION=%APPVEYOR_REPO_TAG_NAME%
-  # vcbuild overwrites the platform variable.
-  - cmd: set ARCH=%platform%
-  - cmd: vcbuild.bat release %ARCH% shared
+  - ps: |
+      # Display information about the build environment
+      If ("$($Env:GYP)" -Like "true") {
+        Write-Host "Using GYP Build System" -BackgroundColor DarkGreen
+      } Else {
+        Write-Host "Using CMake Build System" -BackgroundColor DarkGreen
+        Write-Host "  Visual Studio: $($Env:CMAKE_GENERATOR.Split()[-1])" -BackgroundColor DarkGreen
+      }
+      Write-Host "  Platform:      $($Env:Platform)" -BackgroundColor DarkGreen
+      Write-Host "  Build Version: $($Env:APPVEYOR_BUILD_VERSION)" -BackgroundColor DarkGreen
+      Write-Host "  Branch:        $($Env:APPVEYOR_REPO_BRANCH)" -BackgroundColor DarkGreen
+
+      # Fixed tag version number if using a tag.
+      If ("$Env:APPVEYOR_REPO_TAG" -Like "true") {
+        $Env:APPVEYOR_BUILD_VERSION = "$($Env:APPVEYOR_REPO_TAG_NAME)"
+      }
+
+      # Determine if build is GYP or CMake
+      If ("$($Env:GYP)" -Like "true") {
+        # vcbuild overwrites the platform variable.
+        $Env:ARCH = "$($Env:Platform)"
+      } Else {
+        # Update CMake generator for x64 platforms
+        $generator = "$($Env:CMAKE_GENERATOR)"
+        If ("$($Env:Platform)" -Like "x64") {
+          $generator = "$($generator) Win64"
+        }
+
+        # Build configuration using CMake
+        New-Item -ItemType Directory -Force -Path "msvc_build" | Out-Null
+        Push-Location -Path "msvc_build" | Out-Null
+        cmake -G "$($generator)" ..
+        cmake --build . --config $($Env:Configuration)
+        Pop-Location
+      }
+  - cmd: if defined GYP vcbuild.bat %Configuration% %ARCH% %LIBRARY_TYPE%
 
 cache:
   - C:\projects\libuv\build\gyp
